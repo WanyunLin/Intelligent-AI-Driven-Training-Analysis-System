@@ -1,0 +1,5 @@
+streamlit
+wandb
+pandas
+matplotlib
+openai
