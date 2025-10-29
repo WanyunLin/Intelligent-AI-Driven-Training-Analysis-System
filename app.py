@@ -38,12 +38,7 @@ def api_keys_dialog(logged=False):
     wandb_key = st.text_input(
         "WandB API Key：", type="password", value=st.session_state.get("wandb_key", "")
     )
-    
-    # # =======================
-    # # 預設用，之後砍掉
-    # openai_key = "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"
-    # wandb_key = "b69deaaa154539b7e799f7c73c11ea87623b97f3"
-    # # =======================
+
     
     if logged == True:
         col1, col2 = st.columns(2, vertical_alignment="bottom")
@@ -74,12 +69,6 @@ def api_keys_dialog(logged=False):
             else:
                 st.error("❌ 無效的 API 金鑰錯誤，請重新確認！")
                 print(st.session_state.openai_logged, st.session_state.wandb_logged)
-
-                # if st.session_state.openai_logged:
-                #     client = OpenAI(api_key=st.session_state.openai_key)
-                
-                # api = wandb.Api()
-                # entity = api.default_entity
 
 
     if logged == True:
@@ -146,7 +135,7 @@ def plot_wandb_history(history, target_cols, group_size=6):
 
 # ------------------------- GPT 問答 ------------------------------
 
-def analyze_plot_with_gpt(image_base64, client, user_query=None):
+def analyze_plot_with_gpt(image_base64, client, config, user_query=None):
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
     
@@ -156,7 +145,7 @@ def analyze_plot_with_gpt(image_base64, client, user_query=None):
             "role": "user",
             "content": [
                 {"type": "text",
-                 "text": "請分析這張 Reward 圖表的趨勢，說明訓練過程中模型的學習狀況與可能的問題。"},
+                 "text": "以下列出本次訓練的參數: " + config + "。請分析這張 Reward 圖表的趨勢，說明訓練過程中模型的學習狀況與可能的問題。"},
                 {"type": "image_url",
                  "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
             ]
@@ -167,7 +156,7 @@ def analyze_plot_with_gpt(image_base64, client, user_query=None):
             "role": "user",
             "content": [
                 {"type": "text",
-                 "text": user_query},
+                 "text": str(st.session_state.messages) + user_query},
                 {"type": "image_url",
                  "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
             ]
@@ -196,15 +185,6 @@ def analyze_plot_with_gpt(image_base64, client, user_query=None):
         return None
     
 def display_chat(user_prompt, gpt_answer):
-    # print(container)
-    # if container:
-    #     chat_html = "<div style='height:450px; overflow-y:auto; border:1px solid #ddd; padding:10px;'>"
-    #     if st.session_state.chat_history_display is not None:
-    #         for role, content in st.session_state.chat_history_display:
-    #             chat_html += f"<p><b>{role}:</b> {content}</p>"
-    #     chat_html += "</div>"
-    #     st.markdown(chat_html, unsafe_allow_html=True)
-
     if user_prompt != None:
         # Display user message in chat message container
         st.chat_message("user").markdown(user_prompt)
@@ -244,8 +224,8 @@ def main():
     ## 狀態初始化
     if "api_verified" not in st.session_state:
         st.session_state.api_verified = False
-    if "selectbox_modified" not in st.session_state:
-        st.session_state.selectbox_modified = False
+    if "selectbox_modified_check" not in st.session_state:
+        st.session_state.selectbox_modified_check = False
 
     ## API keys
     if "wandb_logged" not in st.session_state:
@@ -268,10 +248,9 @@ def main():
         st.session_state.Graph = None    # AF:不需要這樣寫
     if "first_quest" not in st.session_state:
         st.session_state.first_quest = True
-    # # if "chat_container" not in st.session_state:
-    # #     st.session_state["chat_container"] = None
-    # if "chat_history_display" not in st.session_state:
-    #     st.session_state["chat_history_display"] = None
+    if "config" not in st.session_state:
+        st.session_state.config = None
+
 
     # Initialize chat history
     if "messages" not in st.session_state:
@@ -318,6 +297,15 @@ def main():
             if selected_project:
                 runs = st.session_state.runs_list[st.session_state.project_list.index(selected_project)]
                 selected_run = st.selectbox("🧪 選擇實驗 (Run)：", runs.keys())
+                
+                if selected_run != st.session_state.selectbox_modified_check:
+                    st.session_state.messages = []
+                    st.session_state.Graph = None
+                    st.session_state.Graph_display = None
+                    st.session_state.first_quest = True
+                    st.session_state.config = None
+                    st.session_state.selectbox_modified_check = selected_run
+                
                 if len(runs)>0:
                     selected_run = runs[selected_run]
             else:
@@ -338,6 +326,8 @@ def main():
                 run = get_run_object(api, entity, selected_project, selected_run)
                 # st.success(f"✅ 已成功載入 Run：{run.name}")
                 divide.divider()    # 分隔線
+
+                st.session_state.config = str(run.config['alg_cfg'])
                 
                 # 製圖
                 with st.spinner("根據 Reward Data 生成折線圖..."):
@@ -375,7 +365,7 @@ def main():
 
     # 第一次自動詢問 GPT 並顯示回覆
     if st.session_state.first_quest and st.session_state.Graph is not None:
-        gpt_answer = analyze_plot_with_gpt(st.session_state.Graph, client)
+        gpt_answer = analyze_plot_with_gpt(st.session_state.Graph, client, st.session_state.config)
         with st.chat_message("assistant"):
             st.markdown(gpt_answer)
         st.session_state.messages.append({"role": "assistant", "content": gpt_answer})
@@ -384,39 +374,13 @@ def main():
     # 後續由使用者輸入提問
     if not st.session_state.first_quest:
         if user_prompt := st.chat_input("根據這張圖其他問題？"):
-            gpt_answer = analyze_plot_with_gpt(st.session_state.Graph, client, user_prompt)
+            gpt_answer = analyze_plot_with_gpt(st.session_state.Graph, client, st.session_state.config, user_prompt)
             with st.chat_message("user"):
                 st.markdown(user_prompt)
             st.session_state.messages.append({"role": "user", "content": user_prompt})
             with st.chat_message("assistant"):
                 st.markdown(gpt_answer)
             st.session_state.messages.append({"role": "assistant", "content": gpt_answer})
-
-
-    # if "chat_history_display" in st.session_state:
-    #     user_input = st.text_input("根據這張圖其他問題？", key="user_input")
-    #     if st.button("📩 提問"):
-    #         if user_input:
-    #             reply = analyze_plot_with_gpt(None, client, user_input)
-    #             if reply:
-    #                 st.session_state.chat_history_display.append(("你", user_input))
-    #                 st.session_state.chat_history_display.append(("GPT", reply))
-    #                 display_chat(chat_container)
-    # if st.session_state:
-    #     user_input = st.text_input("根據這張圖其他問題？", key="user_input")
-    #     if st.button("📩 提問"):
-    #         if user_input:
-    #             reply = analyze_plot_with_gpt(None, client, user_input)
-    #             if reply:
-    #                 st.session_state.chat_history_display.append(("你", user_input))
-    #                 st.session_state.chat_history_display.append(("GPT", reply))
-
-    #                 # # 保留圖表
-    #                 # if "fig_image" in st.session_state:
-    #                 #     with fig_container:
-    #                 #         st.pyplot(st.session_state.fig_image)
-
-    #                 display_chat(st.session_state)
 
 
 if __name__ == "__main__":
