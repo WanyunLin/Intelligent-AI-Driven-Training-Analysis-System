@@ -1,5 +1,0 @@
-matplotlib==3.10.7
-numpy==2.3.2
-openai==2.6.1
-panadas==2.3.3
-wandb
